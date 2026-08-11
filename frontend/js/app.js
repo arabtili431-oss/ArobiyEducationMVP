@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Sozlamalar
 // ---------------------------------------------------------------------------
-const API_BASE = "https://arobiyeducationmvp.onzender.com";
+const API_BASE = "https://arobiyeducationmvp.onrender.com";
 
 const tg = window.Telegram?.WebApp;
 if (tg) {

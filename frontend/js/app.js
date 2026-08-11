@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Sozlamalar
 // ---------------------------------------------------------------------------
-const API_BASE = "http://localhost:8000"; // deploy qilingach o'zgartiring
+const API_BASE = "https://arobiyeducationmvp.onzender.com";
 
 const tg = window.Telegram?.WebApp;
 if (tg) {

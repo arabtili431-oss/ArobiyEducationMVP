@@ -437,10 +437,21 @@ class LearnLessonAdmin(ModelView, model=LearnLesson):
 class LearnExerciseAdmin(ModelView, model=LearnExercise):
     name = "Dars mashqi"
     name_plural = "Dars mashqlari"
-    column_list = [LearnExercise.id, LearnExercise.lesson_id, LearnExercise.question, LearnExercise.correct_answer]
-    form_columns = [LearnExercise.lesson_id, LearnExercise.question, LearnExercise.options,
-                    LearnExercise.correct_answer, LearnExercise.explanation]
 
+    column_list = [
+        LearnExercise.id,
+        LearnExercise.lesson,
+        LearnExercise.question,
+        LearnExercise.correct_answer,
+    ]
+
+    form_columns = [
+        LearnExercise.lesson,
+        LearnExercise.question,
+        LearnExercise.options,
+        LearnExercise.correct_answer,
+        LearnExercise.explanation,
+    ]
 
 class LevelTestAdmin(ModelView, model=LevelTest):
     name = "Daraja testi"

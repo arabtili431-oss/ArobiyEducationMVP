@@ -85,6 +85,8 @@ class LearnLesson(Base):
     video_url = Column(String, nullable=True)  # YouTube yoki boshqa video havolasi
     exercises = relationship("LearnExercise", back_populates="lesson")
 
+def str(self):
+        return self.title
 
 class LearnExercise(Base):
     __tablename__ = "learn_exercises"

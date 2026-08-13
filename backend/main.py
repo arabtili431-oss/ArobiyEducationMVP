@@ -85,8 +85,8 @@ class LearnLesson(Base):
     video_url = Column(String, nullable=True)  # YouTube yoki boshqa video havolasi
     exercises = relationship("LearnExercise", back_populates="lesson")
 
-def __str__(self):
-        return self.title
+    def __str__(self):
+            return self.title
 
 class LearnExercise(Base):
     __tablename__ = "learn_exercises"
@@ -106,8 +106,8 @@ class LevelTest(Base):
     test_type = Column(String)  # "boshlangich" | "at_tanal" | "cefr"
     title = Column(String)
 
-     def __str__(self):
-            return self.title
+    def __str__(self):
+             return self.title
 
 class LevelTestQuestion(Base):
     __tablename__ = "level_test_questions"

@@ -151,7 +151,7 @@ async function openTest(testId, title) {
   content.innerHTML = `<button class="back-btn" onclick="renderDaraja()">← Orqaga</button><h2>${title}</h2><div id="quiz-area"></div>`;
   try {
     const questions = await apiFetch(`/api/tests/${testId}/questions`);
-   renderQuiz(questions, "test", { showResult: true });
+    renderQuiz(questions, "test", { showResult: true });
   } catch (e) {
     document.getElementById("quiz-area").innerHTML = `<p>${e.message}</p>`;
   }
@@ -195,14 +195,28 @@ async function openLearnSection(section) {
   }
 }
 
+function toEmbedUrl(url) {
+  const match = url.match(/(?:youtu\.be\/|youtube\.com\/watch\?v=|youtube\.com\/embed\/)([\w-]+)/);
+  return match ? `https://www.youtube.com/embed/${match[1]}` : url;
+}
+
 async function openLearnLesson(lessonId, section) {
   content.innerHTML = `<button class="back-btn" onclick="openLearnSection('${section}')">← Orqaga</button><div id="lesson-body">Yuklanmoqda...</div>`;
   try {
     const lesson = await apiFetch(`/api/learn/lessons/${lessonId}`);
     const exercises = await apiFetch(`/api/learn/lessons/${lessonId}/exercises`);
+
+    const videoHtml = lesson.video_url
+      ? `<div class="video-wrap"><iframe src="${toEmbedUrl(lesson.video_url)}" frameborder="0" allowfullscreen></iframe></div>`
+      : "";
+    const contentHtml = lesson.content
+      ? `<div class="lesson-content">${lesson.content}</div>`
+      : "";
+
     document.getElementById("lesson-body").innerHTML = `
       <h2>${lesson.title}</h2>
-      <div class="lesson-content">${lesson.content}</div>
+      ${videoHtml}
+      ${contentHtml}
       <div id="quiz-area"></div>
     `;
     renderQuiz(exercises, "learn");
@@ -299,7 +313,7 @@ async function loadWords(level) {
 }
 
 // ---------------------------------------------------------------------------
-// Umumiy mashq/test ko'rsatish komponenti
+// Umumiy mashq/test ko'rsatish komponenti (tanlash -> tasdiqlash -> natija)
 // ---------------------------------------------------------------------------
 function renderQuiz(questions, type, options = {}) {
   const area = document.getElementById("quiz-area");
@@ -313,20 +327,25 @@ function renderQuiz(questions, type, options = {}) {
   let answeredCount = 0;
   const total = questions.length;
 
-  area.innerHTML = questions.map((q, idx) => 
-    <div class="exercise-question">${idx + 1}. ${q.question}</div>
-    <div class="exercise-options" id="options-${q.id}">
-      ${q.options.map((opt) => <button class="exercise-option" data-qid="${q.id}" data-opt="${opt}">${opt}</button>).join("")}
-    </div>
-    <button class="confirm-btn" id="confirm-${q.id}" disabled>Javobni tasdiqlash</button>
-    <p class="exercise-feedback hidden" id="feedback-${q.id}"></p>
-    <br>
-  ).join("") + <div id="quiz-result"></div>;
+  const questionsHtml = questions.map((q, idx) => {
+    const optionsHtml = q.options
+      .map((opt) => `<button class="exercise-option" data-qid="${q.id}" data-opt="${opt}">${opt}</button>`)
+      .join("");
+    return `
+      <div class="exercise-question">${idx + 1}. ${q.question}</div>
+      <div class="exercise-options" id="options-${q.id}">${optionsHtml}</div>
+      <button class="confirm-btn" id="confirm-${q.id}" disabled>Javobni tasdiqlash</button>
+      <p class="exercise-feedback hidden" id="feedback-${q.id}"></p>
+      <br>
+    `;
+  }).join("");
+
+  area.innerHTML = questionsHtml + `<div id="quiz-result"></div>`;
 
   questions.forEach((q) => {
     let selectedBtn = null;
-    const optionsWrap = document.getElementById(options-${q.id});
-    const confirmBtn = document.getElementById(confirm-${q.id});
+    const optionsWrap = document.getElementById(`options-${q.id}`);
+    const confirmBtn = document.getElementById(`confirm-${q.id}`);
 
     optionsWrap.querySelectorAll(".exercise-option").forEach((btn) => {
       btn.addEventListener("click", () => {
@@ -349,11 +368,11 @@ function renderQuiz(questions, type, options = {}) {
           body: JSON.stringify({ exercise_id: Number(q.id), exercise_type: type, answer }),
         });
         selectedBtn.classList.add(result.correct ? "correct" : "incorrect");
-        const feedback = document.getElementById(feedback-${q.id});
+        const feedback = document.getElementById(`feedback-${q.id}`);
         feedback.classList.remove("hidden");
         feedback.textContent = result.correct
           ? "✅ To'g'ri! " + (result.explanation || "")
-          : ❌ Noto'g'ri. To'g'ri javob: ${result.correct_answer}. ${result.explanation || ""};
+          : `❌ Noto'g'ri. To'g'ri javob: ${result.correct_answer}. ${result.explanation || ""}`;
         if (currentUser) currentUser.xp = result.xp;
         if (result.correct) correctCount++;
         answeredCount++;
@@ -379,31 +398,18 @@ function showQuizResult(correct, total) {
   else if (percent >= 33) { level = "A2"; verdict = "📘 Boshlang'ich-o'rta — A2 darajasi."; }
   else { level = "A1"; verdict = "📚 Boshlang'ich — A1 darajasi. Asosdan boshlash tavsiya etiladi."; }
 
-  document.getElementById("quiz-result").innerHTML = 
+  const resultEl = document.getElementById("quiz-result");
+  if (!resultEl) return;
+  resultEl.innerHTML = `
     <div class="result-card">
       <div>Test yakunlandi</div>
       <div class="result-score">${correct}/${total}</div>
       <div class="result-verdict">Sizning darajangiz: <strong>${level}</strong></div>
       <div class="result-verdict">${verdict}</div>
     </div>
-  ;
+  `;
 }
 
-function showQuizResult(correct, total) {
-  const percent = Math.round((correct / total) * 100);
-  let verdict;
-  if (percent >= 80) verdict = "🎉 Ajoyib! Siz yaxshi tayyorgarlik ko'rgansiz.";
-  else if (percent >= 50) verdict = "👍 Yaxshi natija, lekin yana mashq qilish foydali bo'ladi.";
-  else verdict = "📚 Boshlang'ich darslarni qaytadan ko'rib chiqishni tavsiya qilamiz.";
-
-  document.getElementById("quiz-result").innerHTML = 
-    <div class="result-card">
-      <div>Test yakunlandi</div>
-      <div class="result-score">${correct}/${total}</div>
-      <div class="result-verdict">${verdict}</div>
-    </div>
-  ;
-}
 // ---------------------------------------------------------------------------
 // Boshlang'ich yuklash
 // ---------------------------------------------------------------------------

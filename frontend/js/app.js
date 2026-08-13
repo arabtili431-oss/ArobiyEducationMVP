@@ -301,41 +301,66 @@ async function loadWords(level) {
 // ---------------------------------------------------------------------------
 // Umumiy mashq/test ko'rsatish komponenti
 // ---------------------------------------------------------------------------
-function renderQuiz(questions, type) {
+function renderQuiz(questions, type, options = {}) {
   const area = document.getElementById("quiz-area");
   if (!area) return;
   if (!questions || questions.length === 0) {
     area.innerHTML = "<p>Bu yerda hali mashq yo'q.</p>";
     return;
   }
-  area.innerHTML = questions.map((q, idx) => `
+
+  let correctCount = 0;
+  let answeredCount = 0;
+  const total = questions.length;
+
+  area.innerHTML = questions.map((q, idx) => 
     <div class="exercise-question">${idx + 1}. ${q.question}</div>
     <div class="exercise-options" id="options-${q.id}">
-      ${q.options.map((opt) => `<button class="exercise-option" data-qid="${q.id}" data-opt="${opt}">${opt}</button>`).join("")}
+      ${q.options.map((opt) => <button class="exercise-option" data-qid="${q.id}" data-opt="${opt}">${opt}</button>).join("")}
     </div>
+    <button class="confirm-btn" id="confirm-${q.id}" disabled>Javobni tasdiqlash</button>
     <p class="exercise-feedback hidden" id="feedback-${q.id}"></p>
     <br>
-  `).join("");
+  ).join("") + <div id="quiz-result"></div>;
 
-  area.querySelectorAll(".exercise-option").forEach((btn) => {
-    btn.addEventListener("click", async () => {
-      const qid = btn.dataset.qid;
-      const answer = btn.dataset.opt;
-      const optionsWrap = document.getElementById(`options-${qid}`);
+  questions.forEach((q) => {
+    let selectedBtn = null;
+    const optionsWrap = document.getElementById(options-${q.id});
+    const confirmBtn = document.getElementById(confirm-${q.id});
+
+    optionsWrap.querySelectorAll(".exercise-option").forEach((btn) => {
+      btn.addEventListener("click", () => {
+        optionsWrap.querySelectorAll(".exercise-option").forEach((b) => b.classList.remove("selected"));
+        btn.classList.add("selected");
+        selectedBtn = btn;
+        confirmBtn.disabled = false;
+      });
+    });
+
+    confirmBtn.addEventListener("click", async () => {
+      if (!selectedBtn) return;
+      const answer = selectedBtn.dataset.opt;
       optionsWrap.querySelectorAll("button").forEach((b) => (b.disabled = true));
+      confirmBtn.disabled = true;
 
       try {
         const result = await apiFetch("/api/answer", {
           method: "POST",
-          body: JSON.stringify({ exercise_id: Number(qid), exercise_type: type, answer }),
+          body: JSON.stringify({ exercise_id: Number(q.id), exercise_type: type, answer }),
         });
-        btn.classList.add(result.correct ? "correct" : "incorrect");
-        const feedback = document.getElementById(`feedback-${qid}`);
+        selectedBtn.classList.add(result.correct ? "correct" : "incorrect");
+        const feedback = document.getElementById(feedback-${q.id});
         feedback.classList.remove("hidden");
         feedback.textContent = result.correct
           ? "✅ To'g'ri! " + (result.explanation || "")
-          : `❌ Noto'g'ri. To'g'ri javob: ${result.correct_answer}. ${result.explanation || ""}`;
+          : ❌ Noto'g'ri. To'g'ri javob: ${result.correct_answer}. ${result.explanation || ""};
         if (currentUser) currentUser.xp = result.xp;
+        if (result.correct) correctCount++;
+        answeredCount++;
+
+        if (answeredCount === total && options.showResult) {
+          showQuizResult(correctCount, total);
+        }
       } catch (e) {
         alert(e.message);
       }
@@ -343,6 +368,42 @@ function renderQuiz(questions, type) {
   });
 }
 
+function showQuizResult(correct, total) {
+  const percent = Math.round((correct / total) * 100);
+
+  let level, verdict;
+  if (percent >= 93) { level = "C2"; verdict = "🏆 Ajoyib! Siz yuqori (C2) darajadasiz."; }
+  else if (percent >= 80) { level = "C1"; verdict = "🎉 Zo'r natija — C1 darajasi."; }
+  else if (percent >= 67) { level = "B2"; verdict = "👍 Yaxshi — B2 darajasi."; }
+  else if (percent >= 50) { level = "B1"; verdict = "📈 Yomon emas — B1 darajasi."; }
+  else if (percent >= 33) { level = "A2"; verdict = "📘 Boshlang'ich-o'rta — A2 darajasi."; }
+  else { level = "A1"; verdict = "📚 Boshlang'ich — A1 darajasi. Asosdan boshlash tavsiya etiladi."; }
+
+  document.getElementById("quiz-result").innerHTML = 
+    <div class="result-card">
+      <div>Test yakunlandi</div>
+      <div class="result-score">${correct}/${total}</div>
+      <div class="result-verdict">Sizning darajangiz: <strong>${level}</strong></div>
+      <div class="result-verdict">${verdict}</div>
+    </div>
+  ;
+}
+
+function showQuizResult(correct, total) {
+  const percent = Math.round((correct / total) * 100);
+  let verdict;
+  if (percent >= 80) verdict = "🎉 Ajoyib! Siz yaxshi tayyorgarlik ko'rgansiz.";
+  else if (percent >= 50) verdict = "👍 Yaxshi natija, lekin yana mashq qilish foydali bo'ladi.";
+  else verdict = "📚 Boshlang'ich darslarni qaytadan ko'rib chiqishni tavsiya qilamiz.";
+
+  document.getElementById("quiz-result").innerHTML = 
+    <div class="result-card">
+      <div>Test yakunlandi</div>
+      <div class="result-score">${correct}/${total}</div>
+      <div class="result-verdict">${verdict}</div>
+    </div>
+  ;
+}
 // ---------------------------------------------------------------------------
 // Boshlang'ich yuklash
 // ---------------------------------------------------------------------------

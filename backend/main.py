@@ -111,6 +111,7 @@ class LevelTestQuestion(Base):
     __tablename__ = "level_test_questions"
     id = Column(Integer, primary_key=True)
     test_id = Column(Integer, ForeignKey("level_tests.id"))
+    test = relationship("LevelTest")
     question = Column(String)
     options = Column(String)
     correct_answer = Column(String)
@@ -465,7 +466,7 @@ class LevelTestQuestionAdmin(ModelView, model=LevelTestQuestion):
     name = "Test savoli"
     name_plural = "Test savollari"
     column_list = [LevelTestQuestion.id, LevelTestQuestion.test_id, LevelTestQuestion.question]
-    form_columns = [LevelTestQuestion.test_id, LevelTestQuestion.question,
+    form_columns = [LevelTestQuestion.test, LevelTestQuestion.question,
                     LevelTestQuestion.options, LevelTestQuestion.correct_answer]
 
 
@@ -479,7 +480,7 @@ class MashqQuestionAdmin(ModelView, model=MashqQuestion):
     name = "Mashq savoli"
     name_plural = "Mashq savollari"
     column_list = [MashqQuestion.id, MashqQuestion.day_id, MashqQuestion.question]
-    form_columns = [MashqQuestion.day_id, MashqQuestion.question,
+    form_columns = [MashqQuestion.day, MashqQuestion.question,
                     MashqQuestion.options, MashqQuestion.correct_answer]
 
 

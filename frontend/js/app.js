@@ -151,7 +151,7 @@ async function openTest(testId, title) {
   content.innerHTML = `<button class="back-btn" onclick="renderDaraja()">← Orqaga</button><h2>${title}</h2><div id="quiz-area"></div>`;
   try {
     const questions = await apiFetch(`/api/tests/${testId}/questions`);
-    renderQuiz(questions, "test");
+   renderQuiz(questions, "test", { showResult: true });
   } catch (e) {
     document.getElementById("quiz-area").innerHTML = `<p>${e.message}</p>`;
   }

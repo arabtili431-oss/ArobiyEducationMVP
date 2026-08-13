@@ -106,6 +106,8 @@ class LevelTest(Base):
     test_type = Column(String)  # "boshlangich" | "at_tanal" | "cefr"
     title = Column(String)
 
+     def __str__(self):
+            return self.title
 
 class LevelTestQuestion(Base):
     __tablename__ = "level_test_questions"
@@ -124,7 +126,9 @@ class MashqDay(Base):
     day_number = Column(Integer)
     title = Column(String)
     questions = relationship("MashqQuestion", back_populates="day")
-
+    
+    def __str__(self):
+            return self.title
 
 class MashqQuestion(Base):
     __tablename__ = "mashq_questions"

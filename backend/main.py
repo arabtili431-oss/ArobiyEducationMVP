@@ -474,7 +474,7 @@ class MashqDayAdmin(ModelView, model=MashqDay):
     name = "Mashq kuni"
     name_plural = "Mashq kunlari"
     column_list = [MashqDay.id, MashqDay.day_number, MashqDay.title]
-
+    form_columns = [MashqDay.day_number, MashqDay.title]
 
 class MashqQuestionAdmin(ModelView, model=MashqQuestion):
     name = "Mashq savoli"

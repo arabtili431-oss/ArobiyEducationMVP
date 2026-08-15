@@ -326,7 +326,15 @@ function renderQuiz(questions, type, options = {}) {
   let correctCount = 0;
   let answeredCount = 0;
   const total = questions.length;
-
+function shuffleArray(arr) {
+    const a = [...arr];
+    for (let i = a.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [a[i], a[j]] = [a[j], a[i]];
+    }
+    return a;
+  }
+  questions = shuffleArray(questions).map((q) => ({ ...q, options: shuffleArray(q.options) }));
   const questionsHtml = questions.map((q, idx) => {
     const optionsHtml = q.options
       .map((opt) => `<button class="exercise-option" data-qid="${q.id}" data-opt="${opt}">${opt}</button>`)

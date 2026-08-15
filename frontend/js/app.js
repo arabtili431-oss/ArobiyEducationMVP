@@ -105,6 +105,8 @@ function headerHtml(title, showStats = true) {
   return `<div class="page-header"><h1 class="page-title">${title}</h1>${stats}</div>`;
 }
 
+
+Renderprofil new · JS
 // ---------------------------------------------------------------------------
 // PROFIL
 // ---------------------------------------------------------------------------
@@ -116,7 +118,7 @@ const XP_TIERS = [
   { threshold: 12000, name: "Platina", emoji: "💠" },
   { threshold: 25000, name: "Olmos", emoji: "💎" },
 ];
-
+ 
 function xpTierProgress(xp) {
   let current = XP_TIERS[0];
   let next = null;
@@ -132,12 +134,18 @@ function xpTierProgress(xp) {
   const percent = Math.min(100, Math.round((progress / range) * 100));
   return { current, next, percent, remaining: next.threshold - xp };
 }
-
+ 
 function renderProfil() {
   const u = currentUser;
   const xp = u?.xp ?? 0;
   const tierInfo = xpTierProgress(xp);
-
+ 
+  // Telegram profil rasmi (agar mavjud bo'lsa), aks holda emoji
+  const tgPhotoUrl = tg?.initDataUnsafe?.user?.photo_url;
+  const avatarHtml = tgPhotoUrl
+    ? `<img class="profile-avatar-photo" src="${tgPhotoUrl}" alt="avatar">`
+    : `<div class="profile-avatar">👤</div>`;
+ 
   const tierHtml = `
     <div class="xp-tier-card">
       <div class="xp-tier-emoji">${tierInfo.current.emoji}</div>
@@ -152,11 +160,12 @@ function renderProfil() {
       </div>
     </div>
   `;
-
+ 
   content.innerHTML = `
     ${headerHtml("Profil", false)}
     <div class="profile-card">
-      <div class="profile-avatar">👤</div>
+      <div class="profile-brand-mark">ع</div>
+      ${avatarHtml}
       <div class="profile-name">${u ? `${u.first_name} ${u.last_name}`.trim() : "..."}</div>
       <div class="profile-phone">${u?.phone_number || "Raqam ulanmagan"}</div>
       <div class="profile-stats">
@@ -166,8 +175,11 @@ function renderProfil() {
       </div>
     </div>
     ${tierHtml}
+    <div class="profile-signature">ALI AROBIY</div>
   `;
 }
+ 
+
 
 // ---------------------------------------------------------------------------
 // DARAJA ANIQLASH

@@ -203,7 +203,10 @@ class UserOut(BaseModel):
     streak: int
     is_premium: bool
     words_learned: int
-        
+    words_learned: int
+    xp_tier: str
+    xp_tier_emoji: str
+    
     class Config:
         from_attributes = True
 

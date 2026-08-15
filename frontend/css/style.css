@@ -4,6 +4,8 @@
   --card-hover: #1E4029;
   --accent: #4ADE80;
   --accent-strong: #22C55E;
+  --gold: #D4A537;
+  --gold-soft: #8A7230;
   --text: #FFFFFF;
   --text-muted: #9CB0A3;
   --border: #2A4A34;
@@ -214,13 +216,16 @@ html, body {
 .video-wrap iframe { position: absolute; top: 0; left: 0; width: 100%; height: 100%; border: 0; }
 
 /* Profile */
-.profile-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px 20px; text-align: center; margin-bottom: 16px; }
+.profile-card { background: var(--card); border: 1px solid var(--border); border-radius: var(--radius); padding: 24px 20px; text-align: center; margin-bottom: 16px; position: relative; overflow: hidden; }
+.profile-brand-mark { position: absolute; top: 14px; right: 16px; font-size: 13px; color: var(--gold-soft); font-weight: 700; direction: rtl; opacity: 0.7; }
+.profile-avatar-photo { width: 76px; height: 76px; border-radius: 50%; object-fit: cover; border: 2px solid var(--gold); margin-bottom: 10px; }
 .profile-avatar { font-size: 48px; margin-bottom: 8px; }
 .profile-name { font-weight: 700; font-size: 19px; color: var(--text); }
 .profile-phone { color: var(--text-muted); font-size: 13px; margin-top: 4px; }
 .profile-stats { display: flex; justify-content: space-around; margin-top: 18px; }
 .profile-stat-value { font-size: 21px; font-weight: 700; color: var(--accent); }
 .profile-stat-label { font-size: 12px; color: var(--text-muted); }
+.profile-signature { text-align: center; font-size: 11px; color: var(--gold-soft); margin-top: 4px; margin-bottom: 16px; letter-spacing: 0.5px; }
 
 /* XP daraja kartasi */
 .xp-tier-card {
@@ -229,10 +234,10 @@ html, body {
   padding: 20px;
   text-align: center;
   margin-bottom: 16px;
-  border: 1px solid var(--border);
+  border: 1px solid var(--gold-soft);
 }
 .xp-tier-emoji { font-size: 40px; margin-bottom: 6px; }
-.xp-tier-name { font-size: 18px; font-weight: 700; color: var(--accent); }
+.xp-tier-name { font-size: 18px; font-weight: 700; color: var(--gold); }
 .xp-tier-progress-wrap {
   background: var(--border);
   border-radius: 20px;
@@ -241,9 +246,20 @@ html, body {
   overflow: hidden;
 }
 .xp-tier-progress-bar {
-  background: var(--accent);
+  background: linear-gradient(90deg, var(--accent), var(--gold));
   height: 100%;
   border-radius: 20px;
   transition: width 0.3s ease;
 }
 .xp-tier-label { font-size: 12px; color: var(--text-muted); }
+
+/* Hamkor kanallar */
+.partner-channel-card {
+  display: flex; align-items: center; gap: 12px;
+  background: var(--card); border: 1px solid var(--border); border-radius: var(--radius);
+  padding: 14px; margin-bottom: 10px; cursor: pointer;
+}
+.partner-channel-avatar { width: 44px; height: 44px; border-radius: 50%; object-fit: cover; flex-shrink: 0; background: var(--card-hover); }
+.partner-channel-name { font-weight: 700; font-size: 14px; color: var(--text); }
+.partner-channel-desc { font-size: 12px; color: var(--text-muted); margin-top: 2px; }
+.section-label { font-size: 13px; font-weight: 700; color: var(--text-muted); text-transform: uppercase; letter-spacing: 0.5px; margin: 20px 0 10px; }

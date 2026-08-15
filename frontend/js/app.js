@@ -108,8 +108,51 @@ function headerHtml(title, showStats = true) {
 // ---------------------------------------------------------------------------
 // PROFIL
 // ---------------------------------------------------------------------------
+const XP_TIERS = [
+  { threshold: 0, name: "Daraja yo'q", emoji: "⚪" },
+  { threshold: 1000, name: "Bronza", emoji: "🥉" },
+  { threshold: 2500, name: "Kumush", emoji: "🥈" },
+  { threshold: 6000, name: "Oltin", emoji: "🥇" },
+  { threshold: 12000, name: "Platina", emoji: "💠" },
+  { threshold: 25000, name: "Olmos", emoji: "💎" },
+];
+
+function xpTierProgress(xp) {
+  let current = XP_TIERS[0];
+  let next = null;
+  for (let i = 0; i < XP_TIERS.length; i++) {
+    if (xp >= XP_TIERS[i].threshold) {
+      current = XP_TIERS[i];
+      next = XP_TIERS[i + 1] || null;
+    }
+  }
+  if (!next) return { current, next: null, percent: 100, remaining: 0 };
+  const range = next.threshold - current.threshold;
+  const progress = xp - current.threshold;
+  const percent = Math.min(100, Math.round((progress / range) * 100));
+  return { current, next, percent, remaining: next.threshold - xp };
+}
+
 function renderProfil() {
   const u = currentUser;
+  const xp = u?.xp ?? 0;
+  const tierInfo = xpTierProgress(xp);
+
+  const tierHtml = `
+    <div class="xp-tier-card">
+      <div class="xp-tier-emoji">${tierInfo.current.emoji}</div>
+      <div class="xp-tier-name">${tierInfo.current.name}</div>
+      <div class="xp-tier-progress-wrap">
+        <div class="xp-tier-progress-bar" style="width:${tierInfo.percent}%"></div>
+      </div>
+      <div class="xp-tier-label">
+        ${tierInfo.next
+          ? `${xp} / ${tierInfo.next.threshold} XP — keyingi daraja: ${tierInfo.next.emoji} ${tierInfo.next.name}`
+          : `${xp} XP — eng yuqori daraja!`}
+      </div>
+    </div>
+  `;
+
   content.innerHTML = `
     ${headerHtml("Profil", false)}
     <div class="profile-card">
@@ -117,11 +160,12 @@ function renderProfil() {
       <div class="profile-name">${u ? `${u.first_name} ${u.last_name}`.trim() : "..."}</div>
       <div class="profile-phone">${u?.phone_number || "Raqam ulanmagan"}</div>
       <div class="profile-stats">
-        <div><div class="profile-stat-value">${u?.xp ?? 0}</div><div class="profile-stat-label">XP</div></div>
+        <div><div class="profile-stat-value">${xp}</div><div class="profile-stat-label">XP</div></div>
         <div><div class="profile-stat-value">${u?.streak ?? 0}</div><div class="profile-stat-label">Streak</div></div>
         <div><div class="profile-stat-value">${u?.words_learned ?? 0}</div><div class="profile-stat-label">So'z</div></div>
       </div>
     </div>
+    ${tierHtml}
   `;
 }
 

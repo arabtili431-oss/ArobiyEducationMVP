@@ -544,7 +544,13 @@ class DictionaryWordAdmin(ModelView, model=DictionaryWord):
     column_list = [DictionaryWord.id, DictionaryWord.level, DictionaryWord.arabic, DictionaryWord.uzbek]
     form_columns = [DictionaryWord.level, DictionaryWord.arabic, DictionaryWord.uzbek, DictionaryWord.example]
 
-
+class PartnerChannelAdmin(ModelView, model=PartnerChannel):
+    name = "Hamkor kanal"
+    name_plural = "Hamkor kanallar"
+    column_list = [PartnerChannel.id, PartnerChannel.name, PartnerChannel.subscriber_label, PartnerChannel.order]
+    form_columns = [PartnerChannel.name, PartnerChannel.description, PartnerChannel.avatar_url,
+                    PartnerChannel.telegram_link, PartnerChannel.subscriber_label, PartnerChannel.order]
+    
 class UserAdmin(ModelView, model=User):
     name = "Foydalanuvchi"
     name_plural = "Foydalanuvchilar"
@@ -555,4 +561,6 @@ class UserAdmin(ModelView, model=User):
 
 for view in [LearnLessonAdmin, LearnExerciseAdmin, LevelTestAdmin, LevelTestQuestionAdmin,
              MashqDayAdmin, MashqQuestionAdmin, DictionaryWordAdmin, UserAdmin]:
-    admin.add_view(view)
+    admin.add_view(view) 
+                 
+admin.add_view(PartnerChannelAdmin)

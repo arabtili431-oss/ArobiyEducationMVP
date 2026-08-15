@@ -204,6 +204,20 @@ class UserOut(BaseModel):
     is_premium: bool
     words_learned: int
 
+    class UserOut(BaseModel):
+    first_name: str
+    last_name: str
+    phone_number: str | None
+    xp: int
+    streak: int
+    is_premium: bool
+    words_learned: int
+    xp_tier: str
+    xp_tier_emoji: str
+
+    class Config:
+        from_attributes = True
+        
     class Config:
         from_attributes = True
 
@@ -260,9 +274,30 @@ class AnswerIn(BaseModel):
 # API — Profil / Auth
 # ---------------------------------------------------------------------------
 
+def calculate_xp_tier(xp: int):
+    tiers = [
+        (0, "Daraja yo'q", "⚪"),
+        (1000, "Bronza", "🥉"),
+        (2500, "Kumush", "🥈"),
+        (6000, "Oltin", "🥇"),
+        (12000, "Platina", "💠"),
+        (25000, "Olmos", "💎"),
+    ]
+    name, emoji = tiers[0][1], tiers[0][2]
+    for threshold, tname, temoji in tiers:
+        if xp >= threshold:
+            name, emoji = tname, temoji
+    return name, emoji
+    
 @app.get("/api/me", response_model=UserOut)
 def get_me(user: User = Depends(get_current_user)):
-    return user
+    tier_name, tier_emoji = calculate_xp_tier(user.xp)
+    return UserOut(
+        first_name=user.first_name, last_name=user.last_name,
+        phone_number=user.phone_number, xp=user.xp, streak=user.streak,
+        is_premium=user.is_premium, words_learned=user.words_learned,
+        xp_tier=tier_name, xp_tier_emoji=tier_emoji,
+    )
 
 
 @app.post("/api/me/phone", response_model=UserOut)

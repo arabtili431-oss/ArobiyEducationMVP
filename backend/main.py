@@ -149,8 +149,21 @@ class DictionaryWord(Base):
     uzbek = Column(String)
     example = Column(String, nullable=True)
 
+class PartnerChannel(Base):
+    __tablename__ = "partner_channels"
+    id = Column(Integer, primary_key=True)
+    name = Column(String)
+    description = Column(String, nullable=True)
+    avatar_url = Column(String, nullable=True)
+    telegram_link = Column(String)
+    subscriber_label = Column(String, nullable=True)  # masalan "4.4K obunachi"
+    order = Column(Integer, default=0)
 
+    def __str__(self):
+        return self.name
+        
 Base.metadata.create_all(bind=engine)
+
 
 
 # ---------------------------------------------------------------------------
@@ -252,7 +265,17 @@ class DictionaryWordOut(BaseModel):
     example: str | None
     is_locked: bool
 
+class PartnerChannelOut(BaseModel):
+    id: int
+    name: str
+    description: str | None
+    avatar_url: str | None
+    telegram_link: str
+    subscriber_label: str | None
 
+    class Config:
+        from_attributes = True
+        
 class AnswerIn(BaseModel):
     exercise_id: int
     exercise_type: str  # "learn" | "mashq" | "test"
@@ -395,6 +418,9 @@ def list_dictionary(level: str, db: Session = Depends(get_db)):
         for w in words
     ]
 
+@app.get("/api/partner-channels", response_model=list[PartnerChannelOut])
+def list_partner_channels(db: Session = Depends(get_db)):
+    return db.query(PartnerChannel).order_by(PartnerChannel.order).all()
 
 # ---------------------------------------------------------------------------
 # API — Javob yuborish (barcha turdagi mashqlar uchun umumiy)

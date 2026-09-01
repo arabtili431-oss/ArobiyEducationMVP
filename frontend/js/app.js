@@ -1,21 +1,22 @@
-// ---------------------------------------------------------------------------
-// Sozlamalar
-// ---------------------------------------------------------------------------
-const API_BASE = "https://arobiyeducationmvp.onrender.com";
+const API_BASE = window.location.origin;
 
-const tg = window.Telegram?.WebApp;
-if (tg) {
-  tg.ready();
-  tg.expand();
-}
+// State va Kesh xotirasi (Har safar serverga qayta so'rov yubormaslik uchun)
+const appState = {
+  profile: null,
+  learnCategories: null,
+  lessons: {},
+  tests: null,
+  exercises: null,
+  dictionary: null,
+  activeTab: 'profile'
+};
 
+// Telegram initData ma'lumotlarini olish
 function getInitData() {
-  return tg?.initData || "";
+  return window.Telegram?.WebApp?.initData || "";
 }
 
-// ---------------------------------------------------------------------------
-// API yordamchi
-// ---------------------------------------------------------------------------
+// Universal API so'rov funksiyasi
 async function apiFetch(path, options = {}) {
   const res = await fetch(`${API_BASE}${path}`, {
     ...options,
@@ -25,457 +26,369 @@ async function apiFetch(path, options = {}) {
       ...(options.headers || {}),
     },
   });
+
   if (!res.ok) {
     const err = await res.json().catch(() => ({}));
     throw new Error(err.detail || `Xatolik: ${res.status}`);
   }
-  return res.json();
+
+  return await res.json();
 }
 
-const content = document.getElementById("content");
-let currentUser = null;
+// Navigatsiya va Tab'larni almashtirish
+function switchTab(tabName) {
+  appState.activeTab = tabName;
+  
+  document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+  document.querySelectorAll('.nav-btn').forEach(el => el.classList.remove('active'));
 
-// ---------------------------------------------------------------------------
-// Telefon so'rash (bot to'liq ishlashi uchun)
-// ---------------------------------------------------------------------------
-const phoneGate = document.getElementById("phone-gate");
+  const activeContent = document.getElementById(`tab-${tabName}`);
+  const activeBtn = document.getElementById(`nav-${tabName}`);
 
-document.getElementById("share-phone-btn").addEventListener("click", () => {
-  if (!tg?.requestContact) {
-    alert("Bu funksiya faqat Telegram ilovasida ishlaydi.");
+  if (activeContent) activeContent.classList.add('active');
+  if (activeBtn) activeBtn.classList.add('active');
+
+  switch (tabName) {
+    case 'profile':
+      loadProfile();
+      break;
+    case 'learn':
+      loadLearnCategories();
+      break;
+    case 'tests':
+      loadLevelTests();
+      break;
+    case 'exercises':
+      loadDailyExercises();
+      break;
+    case 'dictionary':
+      loadDictionary();
+      break;
+  }
+}
+
+// ---------------- PROFIL BO'LIMI ----------------
+
+async function loadProfile(forceRefresh = false) {
+  const container = document.getElementById('tab-profile');
+  if (!container) return;
+
+  // Agar keshda bor bo'lsa va yangilash majburiy bo'lmasa, keshdan ko'rsatish
+  if (appState.profile && !forceRefresh) {
+    renderProfileUI(appState.profile);
     return;
   }
-  tg.requestContact((granted, contact) => {
-    if (granted && contact?.responseUnsafe?.contact?.phone_number) {
-      const phone = contact.responseUnsafe.contact.phone_number;
-      apiFetch("/api/me/phone", {
-        method: "POST",
-        body: JSON.stringify({ phone_number: phone }),
-      }).then((user) => {
-        currentUser = user;
-        phoneGate.classList.add("hidden");
-      });
-    }
-  });
-});
 
-// ---------------------------------------------------------------------------
-// Foydalanuvchini yuklash
-// ---------------------------------------------------------------------------
-async function loadUser() {
+  container.innerHTML = `<div class="loading">Yuklanmoqda...</div>`;
+
   try {
-    currentUser = await apiFetch("/api/me");
-    if (!currentUser.phone_number) {
-      phoneGate.classList.remove("hidden");
-    }
-  } catch (e) {
-    console.error("Foydalanuvchi yuklanmadi:", e.message);
+    const user = await apiFetch('/api/me');
+    appState.profile = user;
+    renderProfileUI(user);
+  } catch (err) {
+    container.innerHTML = `<div class="error">Profilni yuklashda xatolik: ${err.message}</div>`;
   }
 }
 
-// ---------------------------------------------------------------------------
-// Tab navigatsiyasi
-// ---------------------------------------------------------------------------
-document.querySelectorAll(".nav-item").forEach((btn) => {
-  btn.addEventListener("click", () => {
-    document.querySelectorAll(".nav-item").forEach((b) => b.classList.remove("active"));
-    btn.classList.add("active");
-    renderTab(btn.dataset.tab);
-  });
-});
+function renderProfileUI(user) {
+  const container = document.getElementById('tab-profile');
+  if (!container) return;
 
-function renderTab(tab) {
-  const renderers = {
-    profil: renderProfil,
-    daraja: renderDaraja,
-    organish: renderOrganishHome,
-    mashqlar: renderMashqlar,
-    lugat: renderLugatLevels,
-  };
-  (renderers[tab] || renderOrganishHome)();
-}
+  // Telegram Desktop yoki rasm berilmagan holatlar uchun zaxira avatar
+  const defaultAvatar = 'https://cdn-icons-png.flaticon.com/512/3135/3135715.png';
+  const userPhoto = user.photo_url ? user.photo_url : defaultAvatar;
 
-function headerHtml(title, showStats = true) {
-  const stats = showStats && currentUser
-    ? `<div class="stat-row">
-         <div class="stat">🔥 ${currentUser.streak}</div>
-         <div class="stat">⭐ ${currentUser.xp}</div>
-       </div>`
-    : "";
-  return `<div class="page-header"><h1 class="page-title">${title}</h1>${stats}</div>`;
-}
+  // Telefon raqami mavjud bo'lsa ko'rsatish, bo'lmasa Mini App ichida ulash tugmasi
+  const phoneMarkup = user.phone_number 
+    ? `<div class="phone-box">📱 ${user.phone_number}</div>`
+    : `<button type="button" onclick="requestPhoneFromMiniApp()" class="btn-phone">📱 Raqamni ulash</button>`;
 
-// ---------------------------------------------------------------------------
-// PROFIL
-// ---------------------------------------------------------------------------
-const XP_TIERS = [
-  { threshold: 0, name: "Daraja yo'q", emoji: "⚪" },
-  { threshold: 1000, name: "Bronza", emoji: "🥉" },
-  { threshold: 2500, name: "Kumush", emoji: "🥈" },
-  { threshold: 6000, name: "Oltin", emoji: "🥇" },
-  { threshold: 12000, name: "Platina", emoji: "💠" },
-  { threshold: 25000, name: "Olmos", emoji: "💎" },
-];
- 
-function xpTierProgress(xp) {
-  let current = XP_TIERS[0];
-  let next = null;
-  for (let i = 0; i < XP_TIERS.length; i++) {
-    if (xp >= XP_TIERS[i].threshold) {
-      current = XP_TIERS[i];
-      next = XP_TIERS[i + 1] || null;
-    }
-  }
-  if (!next) return { current, next: null, percent: 100, remaining: 0 };
-  const range = next.threshold - current.threshold;
-  const progress = xp - current.threshold;
-  const percent = Math.min(100, Math.round((progress / range) * 100));
-  return { current, next, percent, remaining: next.threshold - xp };
-}
- 
-function renderProfil() {
-  const u = currentUser;
-  const xp = u?.xp ?? 0;
-  const tierInfo = xpTierProgress(xp);
- 
-  // Telegram profil rasmi (agar mavjud bo'lsa), aks holda emoji
-  const tgPhotoUrl = tg?.initDataUnsafe?.user?.photo_url;
-  const avatarHtml = tgPhotoUrl
-    ? `<img class="profile-avatar-photo" src="${tgPhotoUrl}" alt="avatar">`
-    : `<div class="profile-avatar">👤</div>`;
- 
-  const tierHtml = `
-    <div class="xp-tier-card">
-      <div class="xp-tier-emoji">${tierInfo.current.emoji}</div>
-      <div class="xp-tier-name">${tierInfo.current.name}</div>
-      <div class="xp-tier-progress-wrap">
-        <div class="xp-tier-progress-bar" style="width:${tierInfo.percent}%"></div>
-      </div>
-      <div class="xp-tier-label">
-        ${tierInfo.next
-          ? `${xp} / ${tierInfo.next.threshold} XP — keyingi daraja: ${tierInfo.next.emoji} ${tierInfo.next.name}`
-          : `${xp} XP — eng yuqori daraja!`}
-      </div>
-    </div>
-  `;
- 
-  content.innerHTML = `
-    ${headerHtml("Profil", false)}
+  container.innerHTML = `
     <div class="profile-card">
-      <div class="profile-brand-mark">ع</div>
-      ${avatarHtml}
-      <div class="profile-name">${u ? `${u.first_name} ${u.last_name}`.trim() : "..."}</div>
-      <div class="profile-phone">${u?.phone_number || "Raqam ulanmagan"}</div>
-      <div class="profile-stats">
-        <div><div class="profile-stat-value">${xp}</div><div class="profile-stat-label">XP</div></div>
-        <div><div class="profile-stat-value">${u?.streak ?? 0}</div><div class="profile-stat-label">Streak</div></div>
-        <div><div class="profile-stat-value">${u?.words_learned ?? 0}</div><div class="profile-stat-label">So'z</div></div>
+      <img src="${userPhoto}" 
+           alt="Profile Avatar" 
+           class="profile-avatar"
+           onerror="this.onerror=null; this.src='${defaultAvatar}';" />
+      <h3>${user.full_name || 'Foydalanuvchi'}</h3>
+      <div class="phone-section">${phoneMarkup}</div>
+      
+      <div class="stats-grid">
+        <div class="stat-card">
+          <span class="stat-value">${user.xp || 0}</span>
+          <span class="stat-label">XP</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value">${user.level || 1}</span>
+          <span class="stat-label">Daraja</span>
+        </div>
+        <div class="stat-card">
+          <span class="stat-value">${user.streak || 0}</span>
+          <span class="stat-label">Streak</span>
+        </div>
       </div>
     </div>
-    ${tierHtml}
-    <div class="profile-signature">ALI AROBIY</div>
-  `;
-}
- 
-
-
-// ---------------------------------------------------------------------------
-// DARAJA ANIQLASH
-// ---------------------------------------------------------------------------
-async function renderDaraja() {
-  content.innerHTML = headerHtml("Daraja aniqlash") + `<ul class="item-list" id="tests-list"><p>Yuklanmoqda...</p></ul>`;
-  try {
-    const tests = await apiFetch("/api/tests");
-    const list = document.getElementById("tests-list");
-    list.innerHTML = "";
-    tests.forEach((t) => {
-      const li = document.createElement("li");
-      li.className = "list-item" + (t.is_locked ? " locked" : "");
-      li.innerHTML = `<span class="list-item-title">${t.title}</span>` +
-        (t.is_locked ? `<span class="lock-badge">🔒 Premium</span>` : "");
-      if (!t.is_locked) li.addEventListener("click", () => openTest(t.id, t.title));
-      list.appendChild(li);
-    });
-  } catch (e) {
-    content.innerHTML = headerHtml("Daraja aniqlash") + `<p>Xatolik: ${e.message}</p>`;
-  }
-}
-
-async function openTest(testId, title) {
-  content.innerHTML = `<button class="back-btn" onclick="renderDaraja()">← Orqaga</button><h2>${title}</h2><div id="quiz-area"></div>`;
-  try {
-    const questions = await apiFetch(`/api/tests/${testId}/questions`);
-    renderQuiz(questions, "test", { showResult: true });
-  } catch (e) {
-    document.getElementById("quiz-area").innerHTML = `<p>${e.message}</p>`;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// ARAB TILINI O'RGANISH (Alifbo / Nahv / Sarf)
-// ---------------------------------------------------------------------------
-const learnSectionNames = { alifbo: "Alifbo", nahv: "Nahv", sarf: "Sarf" };
-
-function renderOrganishHome() {
-  content.innerHTML = `
-    ${headerHtml("Arab tilini o'rganish")}
-    <div class="sections-grid">
-      <button class="section-card" onclick="openLearnSection('alifbo')"><span class="section-emoji">🔤</span><span class="section-title">Alifbo</span></button>
-      <button class="section-card" onclick="openLearnSection('nahv')"><span class="section-emoji">📘</span><span class="section-title">Nahv</span></button>
-      <button class="section-card" onclick="openLearnSection('sarf')"><span class="section-emoji">📗</span><span class="section-title">Sarf</span></button>
-    </div>
   `;
 }
 
-async function openLearnSection(section) {
-  content.innerHTML = `<button class="back-btn" onclick="renderOrganishHome()">← Orqaga</button><h2>${learnSectionNames[section]}</h2><ul class="item-list" id="lessons-list"><p>Yuklanmoqda...</p></ul>`;
-  try {
-    const lessons = await apiFetch(`/api/learn/lessons?section=${section}`);
-    const list = document.getElementById("lessons-list");
-    list.innerHTML = "";
-    if (lessons.length === 0) {
-      list.innerHTML = "<p>Bu bo'limda hali dars yo'q.</p>";
-      return;
-    }
-    lessons.forEach((lesson) => {
-      const li = document.createElement("li");
-      li.className = "list-item";
-      li.innerHTML = `<span class="list-item-title">${lesson.order}. ${lesson.title}</span>`;
-      li.addEventListener("click", () => openLearnLesson(lesson.id, section));
-      list.appendChild(li);
-    });
-  } catch (e) {
-    document.getElementById("lessons-list").innerHTML = `<p>${e.message}</p>`;
-  }
-}
-
-function toEmbedUrl(url) {
-  const match = url.match(/(?:youtu\.be\/|youtube\.com\/watch\?v=|youtube\.com\/embed\/)([\w-]+)/);
-  return match ? `https://www.youtube.com/embed/${match[1]}` : url;
-}
-
-async function openLearnLesson(lessonId, section) {
-  content.innerHTML = `<button class="back-btn" onclick="openLearnSection('${section}')">← Orqaga</button><div id="lesson-body">Yuklanmoqda...</div>`;
-  try {
-    const lesson = await apiFetch(`/api/learn/lessons/${lessonId}`);
-    const exercises = await apiFetch(`/api/learn/lessons/${lessonId}/exercises`);
-
-    const videoHtml = lesson.video_url
-      ? `<div class="video-wrap"><iframe src="${toEmbedUrl(lesson.video_url)}" frameborder="0" allowfullscreen></iframe></div>`
-      : "";
-    const contentHtml = lesson.content
-      ? `<div class="lesson-content">${lesson.content}</div>`
-      : "";
-
-    document.getElementById("lesson-body").innerHTML = `
-      <h2>${lesson.title}</h2>
-      ${videoHtml}
-      ${contentHtml}
-      <div id="quiz-area"></div>
-    `;
-    renderQuiz(exercises, "learn");
-  } catch (e) {
-    document.getElementById("lesson-body").innerHTML = `<p>${e.message}</p>`;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// MASHQLAR
-// ---------------------------------------------------------------------------
-async function renderMashqlar() {
-  content.innerHTML = headerHtml("Mashqlar") + `<ul class="item-list" id="mashq-list"><p>Yuklanmoqda...</p></ul>`;
-  try {
-    const days = await apiFetch("/api/mashqlar");
-    const list = document.getElementById("mashq-list");
-    list.innerHTML = "";
-    days.forEach((d) => {
-      const li = document.createElement("li");
-      li.className = "list-item";
-      li.innerHTML = `<span class="list-item-title">${d.title}</span>`;
-      li.addEventListener("click", () => openMashqDay(d.id, d.title));
-      list.appendChild(li);
-    });
-  } catch (e) {
-    content.innerHTML = headerHtml("Mashqlar") + `<p>${e.message}</p>`;
-  }
-}
-
-async function openMashqDay(dayId, title) {
-  content.innerHTML = `<button class="back-btn" onclick="renderMashqlar()">← Orqaga</button><h2>${title}</h2><div id="quiz-area"></div>`;
-  try {
-    const questions = await apiFetch(`/api/mashqlar/${dayId}/questions`);
-    renderQuiz(questions, "mashq");
-  } catch (e) {
-    document.getElementById("quiz-area").innerHTML = `<p>${e.message}</p>`;
-  }
-}
-
-// ---------------------------------------------------------------------------
-// LUG'ATLAR (A1-C2)
-// ---------------------------------------------------------------------------
-const levels = ["a1", "a2", "b1", "b2", "c1", "c2"];
-const LOCKED_LEVELS = new Set(["b2", "c1", "c2"]);
-
-function renderLugatLevels() {
-  content.innerHTML = `
-    ${headerHtml("Lug'atlar")}
-    <div class="level-tabs" id="level-tabs"></div>
-    <div id="words-area"></div>
-  `;
-  const tabsEl = document.getElementById("level-tabs");
-  levels.forEach((lvl, i) => {
-    const btn = document.createElement("button");
-    btn.className = "level-tab" + (i === 0 ? " active" : "") + (LOCKED_LEVELS.has(lvl) ? " locked" : "");
-    btn.textContent = lvl.toUpperCase() + (LOCKED_LEVELS.has(lvl) ? " 🔒" : "");
-    btn.addEventListener("click", () => {
-      document.querySelectorAll(".level-tab").forEach((b) => b.classList.remove("active"));
-      btn.classList.add("active");
-      loadWords(lvl);
-    });
-    tabsEl.appendChild(btn);
-  });
-  loadWords(levels[0]);
-}
-
-async function loadWords(level) {
-  const area = document.getElementById("words-area");
-  area.innerHTML = "<p>Yuklanmoqda...</p>";
-  try {
-    const words = await apiFetch(`/api/lugat?level=${level}`);
-    area.innerHTML = "";
-    if (words.length === 0) {
-      area.innerHTML = "<p>Bu darajada hali so'z yo'q.</p>";
-      return;
-    }
-    words.forEach((w) => {
-      const card = document.createElement("div");
-      card.className = "word-card" + (w.is_locked ? " locked" : "");
-      if (w.is_locked) {
-        card.innerHTML = `<div class="word-uzbek">🔒 ${w.uzbek}</div>`;
-      } else {
-        card.innerHTML = `
-          <div class="word-arabic">${w.arabic}</div>
-          <div class="word-uzbek">${w.uzbek}</div>
-          ${w.example ? `<div class="word-example">${w.example}</div>` : ""}
-        `;
+function requestPhoneFromMiniApp() {
+  if (window.Telegram?.WebApp?.requestContact) {
+    Telegram.WebApp.requestContact((sent, response) => {
+      if (sent && response?.responseUnsafe?.contact) {
+        const phone = response.responseUnsafe.contact.phone_number;
+        
+        apiFetch('/api/update-phone', {
+          method: 'POST',
+          body: JSON.stringify({ phone_number: phone })
+        }).then(() => {
+          alert("Raqamingiz muvaffaqiyatli saqlandi!");
+          loadProfile(true);
+        }).catch(err => {
+          alert("Raqamni saqlashda xatolik: " + err.message);
+        });
       }
-      area.appendChild(card);
     });
-  } catch (e) {
-    area.innerHTML = `<p>${e.message}</p>`;
+  } else {
+    alert("Iltimos, Telegram chatiga o'tib '📱 Raqamni ulashish' tugmasini bosing.");
   }
 }
 
-// ---------------------------------------------------------------------------
-// Umumiy mashq/test ko'rsatish komponenti (tanlash -> tasdiqlash -> natija)
-// ---------------------------------------------------------------------------
-function renderQuiz(questions, type, options = {}) {
-  const area = document.getElementById("quiz-area");
-  if (!area) return;
-  if (!questions || questions.length === 0) {
-    area.innerHTML = "<p>Bu yerda hali mashq yo'q.</p>";
+// ---------------- O'RGANISH BO'LIMI ----------------
+
+async function loadLearnCategories(forceRefresh = false) {
+  const container = document.getElementById('tab-learn');
+  if (!container) return;
+
+  if (appState.learnCategories && !forceRefresh) {
+    renderLearnCategoriesUI(appState.learnCategories);
     return;
   }
 
-  let correctCount = 0;
-  let answeredCount = 0;
-  const total = questions.length;
-function shuffleArray(arr) {
-    const a = [...arr];
-    for (let i = a.length - 1; i > 0; i--) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [a[i], a[j]] = [a[j], a[i]];
-    }
-    return a;
+  container.innerHTML = `<div class="loading">Yuklanmoqda...</div>`;
+
+  try {
+    const categories = await apiFetch('/api/learn/categories');
+    appState.learnCategories = categories;
+    renderLearnCategoriesUI(categories);
+  } catch (err) {
+    container.innerHTML = `<div class="error">Kategoriyalarni yuklashda xatolik: ${err.message}</div>`;
   }
-  questions = shuffleArray(questions).map((q) => ({ ...q, options: shuffleArray(q.options) }));
-  const questionsHtml = questions.map((q, idx) => {
-    const optionsHtml = q.options
-      .map((opt) => `<button class="exercise-option" data-qid="${q.id}" data-opt="${opt}">${opt}</button>`)
-      .join("");
-    return `
-      <div class="exercise-question">${idx + 1}. ${q.question}</div>
-      <div class="exercise-options" id="options-${q.id}">${optionsHtml}</div>
-      <button class="confirm-btn" id="confirm-${q.id}" disabled>Javobni tasdiqlash</button>
-      <p class="exercise-feedback hidden" id="feedback-${q.id}"></p>
-      <br>
-    `;
-  }).join("");
-
-  area.innerHTML = questionsHtml + `<div id="quiz-result"></div>`;
-
-  questions.forEach((q) => {
-    let selectedBtn = null;
-    const optionsWrap = document.getElementById(`options-${q.id}`);
-    const confirmBtn = document.getElementById(`confirm-${q.id}`);
-
-    optionsWrap.querySelectorAll(".exercise-option").forEach((btn) => {
-      btn.addEventListener("click", () => {
-        optionsWrap.querySelectorAll(".exercise-option").forEach((b) => b.classList.remove("selected"));
-        btn.classList.add("selected");
-        selectedBtn = btn;
-        confirmBtn.disabled = false;
-      });
-    });
-
-    confirmBtn.addEventListener("click", async () => {
-      if (!selectedBtn) return;
-      const answer = selectedBtn.dataset.opt;
-      optionsWrap.querySelectorAll("button").forEach((b) => (b.disabled = true));
-      confirmBtn.disabled = true;
-
-      try {
-        const result = await apiFetch("/api/answer", {
-          method: "POST",
-          body: JSON.stringify({ exercise_id: Number(q.id), exercise_type: type, answer }),
-        });
-        selectedBtn.classList.add(result.correct ? "correct" : "incorrect");
-        const feedback = document.getElementById(`feedback-${q.id}`);
-        feedback.classList.remove("hidden");
-        feedback.textContent = result.correct
-          ? "✅ To'g'ri! " + (result.explanation || "")
-          : `❌ Noto'g'ri. To'g'ri javob: ${result.correct_answer}. ${result.explanation || ""}`;
-        if (currentUser) currentUser.xp = result.xp;
-        if (result.correct) correctCount++;
-        answeredCount++;
-
-        if (answeredCount === total && options.showResult) {
-          showQuizResult(correctCount, total);
-        }
-      } catch (e) {
-        alert(e.message);
-      }
-    });
-  });
 }
 
-function showQuizResult(correct, total) {
-  const percent = Math.round((correct / total) * 100);
+function renderLearnCategoriesUI(categories) {
+  const container = document.getElementById('tab-learn');
+  if (!container) return;
 
-  let level, verdict;
-  if (percent >= 93) { level = "C2"; verdict = "🏆 Ajoyib! Siz yuqori (C2) darajadasiz."; }
-  else if (percent >= 80) { level = "C1"; verdict = "🎉 Zo'r natija — C1 darajasi."; }
-  else if (percent >= 67) { level = "B2"; verdict = "👍 Yaxshi — B2 darajasi."; }
-  else if (percent >= 50) { level = "B1"; verdict = "📈 Yomon emas — B1 darajasi."; }
-  else if (percent >= 33) { level = "A2"; verdict = "📘 Boshlang'ich-o'rta — A2 darajasi."; }
-  else { level = "A1"; verdict = "📚 Boshlang'ich — A1 darajasi. Asosdan boshlash tavsiya etiladi."; }
+  if (!categories || categories.length === 0) {
+    container.innerHTML = `<div class="empty-msg">Bu bo'limda hali dars yo'q</div>`;
+    return;
+  }
 
-  const resultEl = document.getElementById("quiz-result");
-  if (!resultEl) return;
-  resultEl.innerHTML = `
-    <div class="result-card">
-      <div>Test yakunlandi</div>
-      <div class="result-score">${correct}/${total}</div>
-      <div class="result-verdict">Sizning darajangiz: <strong>${level}</strong></div>
-      <div class="result-verdict">${verdict}</div>
+  let html = `<div class="categories-grid">`;
+  categories.forEach(cat => {
+    html += `
+      <div class="category-card" onclick="loadLessons(${cat.id}, '${cat.title}')">
+        <h4>${cat.title}</h4>
+        <p>${cat.description || ''}</p>
+      </div>
+    `;
+  });
+  html += `</div>`;
+
+  container.innerHTML = html;
+}
+
+async function loadLessons(categoryId, categoryTitle) {
+  const container = document.getElementById('tab-learn');
+  if (!container) return;
+
+  if (appState.lessons[categoryId]) {
+    renderLessonsUI(categoryId, categoryTitle, appState.lessons[categoryId]);
+    return;
+  }
+
+  container.innerHTML = `<div class="loading">Yuklanmoqda...</div>`;
+
+  try {
+    const lessons = await apiFetch(`/api/learn/categories/${categoryId}/lessons`);
+    appState.lessons[categoryId] = lessons;
+    renderLessonsUI(categoryId, categoryTitle, lessons);
+  } catch (err) {
+    container.innerHTML = `<div class="error">Darslarni yuklashda xatolik: ${err.message}</div>`;
+  }
+}
+
+function renderLessonsUI(categoryId, categoryTitle, lessons) {
+  const container = document.getElementById('tab-learn');
+  if (!container) return;
+
+  let html = `
+    <div class="sub-header">
+      <button onclick="loadLearnCategories()" class="btn-back">← Orqaga</button>
+      <h3>${categoryTitle}</h3>
     </div>
   `;
+
+  if (!lessons || lessons.length === 0) {
+    html += `<div class="empty-msg">Bu bo'limda hali dars yo'q</div>`;
+  } else {
+    html += `<div class="lessons-list">`;
+    lessons.forEach(lesson => {
+      html += `
+        <div class="lesson-card">
+          <span>${lesson.title}</span>
+        </div>
+      `;
+    });
+    html += `</div>`;
+  }
+
+  container.innerHTML = html;
 }
 
-// ---------------------------------------------------------------------------
-// Boshlang'ich yuklash
-// ---------------------------------------------------------------------------
-(async function init() {
-  await loadUser();
-  renderOrganishHome();
-})();
+// ---------------- DARAJA TESTLARI BO'LIMI ----------------
+
+async function loadLevelTests(forceRefresh = false) {
+  const container = document.getElementById('tab-tests');
+  if (!container) return;
+
+  if (appState.tests && !forceRefresh) {
+    renderLevelTestsUI(appState.tests);
+    return;
+  }
+
+  container.innerHTML = `<div class="loading">Yuklanmoqda...</div>`;
+
+  try {
+    const tests = await apiFetch('/api/tests');
+    appState.tests = tests;
+    renderLevelTestsUI(tests);
+  } catch (err) {
+    container.innerHTML = `<div class="error">Testlarni yuklashda xatolik: ${err.message}</div>`;
+  }
+}
+
+function renderLevelTestsUI(tests) {
+  const container = document.getElementById('tab-tests');
+  if (!container) return;
+
+  if (!tests || tests.length === 0) {
+    container.innerHTML = `<div class="empty-msg">Hozircha testlar mavjud emas</div>`;
+    return;
+  }
+
+  let html = `<div class="tests-list">`;
+  tests.forEach(test => {
+    html += `
+      <div class="test-card ${test.is_locked ? 'locked' : ''}">
+        <h4>${test.title}</h4>
+        <p>${test.description || ''}</p>
+        ${test.is_locked ? `<span class="lock-icon">🔒 Premium</span>` : `<button class="btn-primary">Testni boshlash</button>`}
+      </div>
+    `;
+  });
+  html += `</div>`;
+
+  container.innerHTML = html;
+}
+
+// ---------------- MASHQLAR BO'LIMI ----------------
+
+async function loadDailyExercises(forceRefresh = false) {
+  const container = document.getElementById('tab-exercises');
+  if (!container) return;
+
+  if (appState.exercises && !forceRefresh) {
+    renderDailyExercisesUI(appState.exercises);
+    return;
+  }
+
+  container.innerHTML = `<div class="loading">Yuklanmoqda...</div>`;
+
+  try {
+    const exercises = await apiFetch('/api/mashqlar');
+    appState.exercises = exercises;
+    renderDailyExercisesUI(exercises);
+  } catch (err) {
+    container.innerHTML = `<div class="error">Mashqlarni yuklashda xatolik: ${err.message}</div>`;
+  }
+}
+
+function renderDailyExercisesUI(exercises) {
+  const container = document.getElementById('tab-exercises');
+  if (!container) return;
+
+  if (!exercises || exercises.length === 0) {
+    container.innerHTML = `<div class="empty-msg">Hozircha kunlik mashqlar yo'q</div>`;
+    return;
+  }
+
+  let html = `<div class="exercises-list">`;
+  exercises.forEach(ex => {
+    html += `
+      <div class="exercise-card">
+        <h4>${ex.title}</h4>
+        <button class="btn-primary">Boshlash</button>
+      </div>
+    `;
+  });
+  html += `</div>`;
+
+  container.innerHTML = html;
+}
+
+// ---------------- LUG'AT BO'LIMI ----------------
+
+async function loadDictionary(forceRefresh = false) {
+  const container = document.getElementById('tab-dictionary');
+  if (!container) return;
+
+  if (appState.dictionary && !forceRefresh) {
+    renderDictionaryUI(appState.dictionary);
+    return;
+  }
+
+  container.innerHTML = `<div class="loading">Yuklanmoqda...</div>`;
+
+  try {
+    const dictionary = await apiFetch('/api/lugat');
+    appState.dictionary = dictionary;
+    renderDictionaryUI(dictionary);
+  } catch (err) {
+    container.innerHTML = `<div class="error">Lug'atni yuklashda xatolik: ${err.message}</div>`;
+  }
+}
+
+function renderDictionaryUI(dictionary) {
+  const container = document.getElementById('tab-dictionary');
+  if (!container) return;
+
+  if (!dictionary || dictionary.length === 0) {
+    container.innerHTML = `<div class="empty-msg">Bu darajada hali so'z yo'q</div>`;
+    return;
+  }
+
+  let html = `<div class="dictionary-list">`;
+  dictionary.forEach(item => {
+    html += `
+      <div class="word-card">
+        <span class="word-arabic">${item.arabic}</span>
+        <span class="word-uzbek">${item.uzbek}</span>
+      </div>
+    `;
+  });
+  html += `</div>`;
+
+  container.innerHTML = html;
+}
+
+// ---------------- INIZIALIZATSIYA ----------------
+
+document.addEventListener("DOMContentLoaded", () => {
+  if (window.Telegram && window.Telegram.WebApp) {
+    window.Telegram.WebApp.ready();
+    window.Telegram.WebApp.expand();
+  }
+
+  // Boshlang'ich profilni yuklash
+  loadProfile();
+});

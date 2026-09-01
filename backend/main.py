@@ -1,566 +1,422 @@
-"""
-Arobiy Education MVP - to'liq backend
-5 ta bo'lim: Profil, Daraja aniqlash, Arab tilini o'rganish, Mashqlar, Lug'atlar
-"""
-
-import hashlib
-import hmac
-import json
 import os
+import hmac
+import hashlib
+import json
 from urllib.parse import parse_qsl
+from typing import Optional, List
 
-from fastapi import FastAPI, HTTPException, Header, Depends, Request
+from fastapi import FastAPI, Depends, HTTPException, Header, status
 from fastapi.middleware.cors import CORSMiddleware
-from starlette.middleware.sessions import SessionMiddleware
 from pydantic import BaseModel
-from sqlalchemy import create_engine, Column, Integer, String, Boolean, ForeignKey
-from sqlalchemy.orm import declarative_base, sessionmaker, relationship, Session
+from sqlalchemy.ext.asyncio import AsyncSession, create_async_engine, async_sessionmaker
+from sqlalchemy.future import select
+
 from sqladmin import Admin, ModelView
-from sqladmin.authentication import AuthenticationBackend
 
-# ---------------------------------------------------------------------------
-# Sozlamalar
-# ---------------------------------------------------------------------------
+# Bazaviy modellar
+from models import (
+    Base,
+    User,
+    LearnCategory,
+    LearnLesson,
+    LearnExercise,
+    LevelTest,
+    LevelTestQuestion,
+    MashqDay,
+    MashqQuestion,
+    DictionaryWord,
+    PartnerChannel,
+)
 
-BOT_TOKEN = os.environ.get("BOT_TOKEN", "PUT_YOUR_BOT_TOKEN_HERE")
-DATABASE_URL = os.environ.get("DATABASE_URL", "sqlite:///./arobiy.db")
+DATABASE_URL = os.getenv("DATABASE_URL", "sqlite+aiosqlite:///./arobiy.db")
+BOT_TOKEN = os.getenv("BOT_TOKEN", "YOUR_TELEGRAM_BOT_TOKEN")
 
-# Admin panel uchun login/parol — bularni albatta o'zgartiring!
-ADMIN_USERNAME = os.environ.get("ADMIN_USERNAME", "admin")
-ADMIN_PASSWORD = os.environ.get("ADMIN_PASSWORD", "arobiy2026")
-ADMIN_SECRET_KEY = os.environ.get("ADMIN_SECRET_KEY", "shu-kalitni-ham-ozgartiring")
+engine = create_async_engine(DATABASE_URL, echo=False)
+AsyncSessionLocal = async_sessionmaker(engine, expire_on_commit=False)
 
-# B2/C1/C2 lug'at darajalari va At-Tanal/CEFR testlari hozircha qulflangan (premium)
-LOCKED_LUGAT_LEVELS = {"b2", "c1", "c2"}
-LOCKED_TEST_TYPES = {"at_tanal", "cefr"}
+app = FastAPI(title="ArobiyEducationMVP API", version="1.0.0")
 
-app = FastAPI(title="Arobiy Education API")
+# CORS sozlamalari
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
+    allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
 )
-app.add_middleware(SessionMiddleware, secret_key=ADMIN_SECRET_KEY)
 
-connect_args = {"check_same_thread": False} if DATABASE_URL.startswith("sqlite") else {}
-engine = create_engine(DATABASE_URL, connect_args=connect_args)
-SessionLocal = sessionmaker(bind=engine, autoflush=False, autocommit=False)
-Base = declarative_base()
+# Baza sessiyasini olish
+async def get_db():
+    async with AsyncSessionLocal() as session:
+        yield session
 
-
-def get_db():
-    db = SessionLocal()
+# Telegram initData xavfsizlik tekshiruvi
+def verify_telegram_init_data(init_data: str) -> dict:
+    if not init_data:
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Telegram initData uzatilmadi",
+        )
     try:
-        yield db
-    finally:
-        db.close()
+        parsed_data = dict(parse_qsl(init_data))
+        hash_from_telegram = parsed_data.pop("hash", None)
+        if not hash_from_telegram:
+            raise ValueError("Hash topilmadi")
 
+        data_check_string = "\n".join(
+            f"{k}={v}" for k, v in sorted(parsed_data.items())
+        )
+        secret_key = hmac.new(
+            b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256
+        ).digest()
+        calculated_hash = hmac.new(
+            secret_key, data_check_string.encode(), hashlib.sha256
+        ).hexdigest()
 
-# ---------------------------------------------------------------------------
-# Modellar
-# ---------------------------------------------------------------------------
+        if calculated_hash != hash_from_telegram:
+            raise ValueError("Hash mos kelmadi")
 
-class User(Base):
-    __tablename__ = "users"
-    id = Column(Integer, primary_key=True)
-    telegram_id = Column(String, unique=True, index=True, nullable=False)
-    phone_number = Column(String, nullable=True)
-    first_name = Column(String, default="")
-    last_name = Column(String, default="")
-    xp = Column(Integer, default=0)
-    streak = Column(Integer, default=0)
-    is_premium = Column(Boolean, default=False)
-    words_learned = Column(Integer, default=0)
-
-
-# --- Arab tilini o'rganish: Alifbo / Nahv / Sarf ---
-class LearnLesson(Base):
-    __tablename__ = "learn_lessons"
-    id = Column(Integer, primary_key=True)
-    section = Column(String)   # "alifbo" | "nahv" | "sarf"
-    order = Column(Integer)
-    title = Column(String)
-    content = Column(String, default="")   # matnli tushuntirish (ixtiyoriy, bo'sh qoldirsa bo'ladi)
-    video_url = Column(String, nullable=True)  # YouTube yoki boshqa video havolasi
-    exercises = relationship("LearnExercise", back_populates="lesson")
-
-    def __str__(self):
-            return self.title
-
-class LearnExercise(Base):
-    __tablename__ = "learn_exercises"
-    id = Column(Integer, primary_key=True)
-    lesson_id = Column(Integer, ForeignKey("learn_lessons.id"))
-    question = Column(String)
-    options = Column(String)   # JSON array
-    correct_answer = Column(String)
-    explanation = Column(String, nullable=True)
-    lesson = relationship("LearnLesson", back_populates="exercises")
-
-
-# --- Daraja aniqlash: Boshlang'ich / At-Tanal / CEFR ---
-class LevelTest(Base):
-    __tablename__ = "level_tests"
-    id = Column(Integer, primary_key=True)
-    test_type = Column(String)  # "boshlangich" | "at_tanal" | "cefr"
-    title = Column(String)
-
-    def __str__(self):
-             return self.title
-
-class LevelTestQuestion(Base):
-    __tablename__ = "level_test_questions"
-    id = Column(Integer, primary_key=True)
-    test_id = Column(Integer, ForeignKey("level_tests.id"))
-    test = relationship("LevelTest")
-    question = Column(String)
-    options = Column(String)
-    correct_answer = Column(String)
-
-
-# --- Mashqlar: kun bo'yicha ---
-class MashqDay(Base):
-    __tablename__ = "mashq_days"
-    id = Column(Integer, primary_key=True)
-    day_number = Column(Integer)
-    title = Column(String)
-    questions = relationship("MashqQuestion", back_populates="day")
-    
-    def __str__(self):
-            return self.title
-
-class MashqQuestion(Base):
-    __tablename__ = "mashq_questions"
-    id = Column(Integer, primary_key=True)
-    day_id = Column(Integer, ForeignKey("mashq_days.id"))
-    question = Column(String)
-    options = Column(String)
-    correct_answer = Column(String)
-    day = relationship("MashqDay", back_populates="questions")
-
-
-# --- Lug'atlar: A1 - C2 ---
-class DictionaryWord(Base):
-    __tablename__ = "dictionary_words"
-    id = Column(Integer, primary_key=True)
-    level = Column(String)  # "a1".."c2"
-    arabic = Column(String)
-    uzbek = Column(String)
-    example = Column(String, nullable=True)
-
-class PartnerChannel(Base):
-    __tablename__ = "partner_channels"
-    id = Column(Integer, primary_key=True)
-    name = Column(String)
-    description = Column(String, nullable=True)
-    avatar_url = Column(String, nullable=True)
-    telegram_link = Column(String)
-    subscriber_label = Column(String, nullable=True)  # masalan "4.4K obunachi"
-    order = Column(Integer, default=0)
-
-    def __str__(self):
-        return self.name
-        
-Base.metadata.create_all(bind=engine)
-
-
-
-# ---------------------------------------------------------------------------
-# Telegram autentifikatsiyasi
-# ---------------------------------------------------------------------------
-
-def validate_telegram_data(init_data: str) -> dict:
-    try:
-        parsed = dict(parse_qsl(init_data))
-        received_hash = parsed.pop("hash", None)
-        if not received_hash:
-            raise HTTPException(status_code=401, detail="Hash topilmadi")
-        data_check_string = "\n".join(f"{k}={v}" for k, v in sorted(parsed.items()))
-        secret_key = hmac.new(b"WebAppData", BOT_TOKEN.encode(), hashlib.sha256).digest()
-        calculated_hash = hmac.new(secret_key, data_check_string.encode(), hashlib.sha256).hexdigest()
-        if calculated_hash != received_hash:
-            raise HTTPException(status_code=401, detail="Noto'g'ri imzo")
-        return json.loads(parsed.get("user", "{}"))
-    except HTTPException:
-        raise
+        return json.loads(parsed_data.get("user", "{}"))
     except Exception:
-        raise HTTPException(status_code=401, detail="initData noto'g'ri formatda")
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Xavfsizlik tekshiruvidan o'tmadi",
+        )
 
+# Foydalanuvchini aniqlash va bazadan olish
+async def get_current_user(
+    x_telegram_init_data: Optional[str] = Header(None),
+    db: AsyncSession = Depends(get_db),
+) -> User:
+    user_data = verify_telegram_init_data(x_telegram_init_data or "")
+    telegram_id = user_data.get("id")
 
-def get_current_user(x_telegram_init_data: str = Header(...), db: Session = Depends(get_db)) -> User:
-    tg_user = validate_telegram_data(x_telegram_init_data)
-    telegram_id = str(tg_user.get("id"))
-    user = db.query(User).filter(User.telegram_id == telegram_id).first()
+    if not telegram_id:
+        raise HTTPException(
+            status_code=401, detail="Telegram ID aniqlanmadi"
+        )
+
+    stmt = select(User).where(User.telegram_id == telegram_id)
+    result = await db.execute(stmt)
+    user = result.scalar_one_or_none()
+
     if not user:
+        first_name = user_data.get("first_name", "")
+        last_name = user_data.get("last_name", "")
+        full_name = f"{first_name} {last_name}".strip() or "Foydalanuvchi"
+
         user = User(
             telegram_id=telegram_id,
-            first_name=tg_user.get("first_name", ""),
-            last_name=tg_user.get("last_name", ""),
+            full_name=full_name,
+            username=user_data.get("username"),
+            photo_url=user_data.get("photo_url"),
+            xp=0,
+            level=1,
+            streak=0,
         )
         db.add(user)
-        db.commit()
-        db.refresh(user)
+        await db.commit()
+        await db.refresh(user)
+
     return user
 
-
-# ---------------------------------------------------------------------------
-# Pydantic sxemalar
-# ---------------------------------------------------------------------------
-
-class UserOut(BaseModel):
-    first_name: str
-    last_name: str
-    phone_number: str | None
-    xp: int
-    streak: int
-    is_premium: bool
-    words_learned: int
-    words_learned: int
-    xp_tier: str
-    xp_tier_emoji: str
-    
-    class Config:
-        from_attributes = True
-
-
-class PhoneIn(BaseModel):
+# Pydantic Modellari
+class PhoneUpdate(BaseModel):
     phone_number: str
 
+class AnswerSubmit(BaseModel):
+    question_id: int
+    question_type: str  # 'learn', 'test', 'mashq'
+    selected_option: str
 
-class LearnLessonOut(BaseModel):
-    id: int
-    section: str
-    order: int
-    title: str
+# ------------------- API ENDPOINTLARI -------------------
 
-    class Config:
-        from_attributes = True
+# 1. FOYDALANUVCHI PROFILI
+@app.get("/api/me")
+async def get_me(user: User = Depends(get_current_user)):
+    return {
+        "id": user.id,
+        "telegram_id": user.telegram_id,
+        "full_name": user.full_name,
+        "username": user.username,
+        "photo_url": user.photo_url,
+        "phone_number": user.phone_number,
+        "xp": user.xp,
+        "level": user.level,
+        "streak": user.streak,
+    }
 
+@app.post("/api/update-phone")
+async def update_phone(
+    data: PhoneUpdate,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    user.phone_number = data.phone_number
+    await db.commit()
+    return {"status": "ok", "message": "Raqam muvaffaqiyatli saqlandi"}
 
-class LearnLessonDetailOut(LearnLessonOut):
-    content: str
-    video_url: str | None
-
-
-class LevelTestOut(BaseModel):
-    id: int
-    test_type: str
-    title: str
-    is_locked: bool
-
-
-class MashqDayOut(BaseModel):
-    id: int
-    day_number: int
-    title: str
-    is_locked: bool
-
-
-class DictionaryWordOut(BaseModel):
-    id: int
-    level: str
-    arabic: str
-    uzbek: str
-    example: str | None
-    is_locked: bool
-
-class PartnerChannelOut(BaseModel):
-    id: int
-    name: str
-    description: str | None
-    avatar_url: str | None
-    telegram_link: str
-    subscriber_label: str | None
-
-    class Config:
-        from_attributes = True
-        
-class AnswerIn(BaseModel):
-    exercise_id: int
-    exercise_type: str  # "learn" | "mashq" | "test"
-    answer: str
-
-
-# ---------------------------------------------------------------------------
-# API — Profil / Auth
-# ---------------------------------------------------------------------------
-
-def calculate_xp_tier(xp: int):
-    tiers = [
-        (0, "Daraja yo'q", "⚪"),
-        (1000, "Bronza", "🥉"),
-        (2500, "Kumush", "🥈"),
-        (6000, "Oltin", "🥇"),
-        (12000, "Platina", "💠"),
-        (25000, "Olmos", "💎"),
+# 2. O'RGANISH (LEARN)
+@app.get("/api/learn/categories")
+async def get_learn_categories(db: AsyncSession = Depends(get_db)):
+    stmt = select(LearnCategory)
+    result = await db.execute(stmt)
+    categories = result.scalars().all()
+    return [
+        {
+            "id": c.id,
+            "title": c.title,
+            "description": getattr(c, "description", ""),
+            "slug": getattr(c, "slug", ""),
+        }
+        for c in categories
     ]
-    name, emoji = tiers[0][1], tiers[0][2]
-    for threshold, tname, temoji in tiers:
-        if xp >= threshold:
-            name, emoji = tname, temoji
-    return name, emoji
-    
-@app.get("/api/me", response_model=UserOut)
-def get_me(user: User = Depends(get_current_user)):
-    tier_name, tier_emoji = calculate_xp_tier(user.xp)
-    return UserOut(
-        first_name=user.first_name, last_name=user.last_name,
-        phone_number=user.phone_number, xp=user.xp, streak=user.streak,
-        is_premium=user.is_premium, words_learned=user.words_learned,
-        xp_tier=tier_name, xp_tier_emoji=tier_emoji,
-    )
 
+@app.get("/api/learn/categories/{category_id}/lessons")
+async def get_learn_lessons(
+    category_id: int, db: AsyncSession = Depends(get_db)
+):
+    stmt = select(LearnLesson).where(LearnLesson.category_id == category_id)
+    result = await db.execute(stmt)
+    lessons = result.scalars().all()
+    return [
+        {
+            "id": l.id,
+            "category_id": l.category_id,
+            "title": l.title,
+            "order": getattr(l, "order", 1),
+        }
+        for l in lessons
+    ]
 
-@app.post("/api/me/phone", response_model=UserOut)
-def set_phone(payload: PhoneIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    """Telegram 'share contact' tugmasi bosilgach, telefon raqamini saqlaydi."""
-    user.phone_number = payload.phone_number
-    db.commit()
-    db.refresh(user)
-    return user
-
-
-# ---------------------------------------------------------------------------
-# API — Arab tilini o'rganish (Alifbo / Nahv / Sarf) — barchasi ochiq
-# ---------------------------------------------------------------------------
-
-@app.get("/api/learn/lessons", response_model=list[LearnLessonOut])
-def list_learn_lessons(section: str, db: Session = Depends(get_db)):
-    return db.query(LearnLesson).filter(LearnLesson.section == section).order_by(LearnLesson.order).all()
-
-
-@app.get("/api/learn/lessons/{lesson_id}", response_model=LearnLessonDetailOut)
-def get_learn_lesson(lesson_id: int, db: Session = Depends(get_db)):
-    lesson = db.query(LearnLesson).filter(LearnLesson.id == lesson_id).first()
+@app.get("/api/learn/lessons/{lesson_id}")
+async def get_lesson_detail(
+    lesson_id: int, db: AsyncSession = Depends(get_db)
+):
+    stmt = select(LearnLesson).where(LearnLesson.id == lesson_id)
+    result = await db.execute(stmt)
+    lesson = result.scalar_one_or_none()
     if not lesson:
         raise HTTPException(status_code=404, detail="Dars topilmadi")
-    return lesson
 
+    ex_stmt = select(LearnExercise).where(
+        LearnExercise.lesson_id == lesson_id
+    )
+    ex_result = await db.execute(ex_stmt)
+    exercises = ex_result.scalars().all()
 
-@app.get("/api/learn/lessons/{lesson_id}/exercises")
-def get_learn_exercises(lesson_id: int, db: Session = Depends(get_db)):
-    exercises = db.query(LearnExercise).filter(LearnExercise.lesson_id == lesson_id).all()
+    return {
+        "id": lesson.id,
+        "title": lesson.title,
+        "content": getattr(lesson, "content", ""),
+        "exercises": [
+            {
+                "id": e.id,
+                "question": e.question,
+                "options": getattr(e, "options", []),
+            }
+            for e in exercises
+        ],
+    }
+
+# 3. DARAJA TESTLARI (LEVEL TESTS)
+@app.get("/api/tests")
+async def get_level_tests(db: AsyncSession = Depends(get_db)):
+    stmt = select(LevelTest)
+    result = await db.execute(stmt)
+    tests = result.scalars().all()
     return [
-        {"id": e.id, "question": e.question, "options": json.loads(e.options)}
-        for e in exercises
-    ]
-
-
-# ---------------------------------------------------------------------------
-# API — Daraja aniqlash (Boshlang'ich ochiq, At-Tanal/CEFR qulflangan)
-# ---------------------------------------------------------------------------
-
-@app.get("/api/tests", response_model=list[LevelTestOut])
-def list_tests(db: Session = Depends(get_db)):
-    tests = db.query(LevelTest).all()
-    return [
-        LevelTestOut(
-            id=t.id, test_type=t.test_type, title=t.title,
-            is_locked=t.test_type in LOCKED_TEST_TYPES,
-        )
+        {
+            "id": t.id,
+            "title": t.title,
+            "description": getattr(t, "description", ""),
+            "is_locked": getattr(t, "is_locked", False),
+        }
         for t in tests
     ]
 
-
 @app.get("/api/tests/{test_id}/questions")
-def get_test_questions(test_id: int, db: Session = Depends(get_db)):
-    test = db.query(LevelTest).filter(LevelTest.id == test_id).first()
-    if not test:
-        raise HTTPException(status_code=404, detail="Test topilmadi")
-    if test.test_type in LOCKED_TEST_TYPES:
-        raise HTTPException(status_code=403, detail="Bu test premium — hozircha yopiq")
-    questions = db.query(LevelTestQuestion).filter(LevelTestQuestion.test_id == test_id).all()
+async def get_test_questions(
+    test_id: int, db: AsyncSession = Depends(get_db)
+):
+    stmt = select(LevelTestQuestion).where(
+        LevelTestQuestion.test_id == test_id
+    )
+    result = await db.execute(stmt)
+    questions = result.scalars().all()
     return [
-        {"id": q.id, "question": q.question, "options": json.loads(q.options)}
+        {
+            "id": q.id,
+            "question": q.question,
+            "options": getattr(q, "options", []),
+        }
         for q in questions
     ]
 
-
-# ---------------------------------------------------------------------------
-# API — Mashqlar (kun bo'yicha, barchasi ochiq)
-# ---------------------------------------------------------------------------
-
-@app.get("/api/mashqlar", response_model=list[MashqDayOut])
-def list_mashq_days(db: Session = Depends(get_db)):
-    days = db.query(MashqDay).order_by(MashqDay.day_number).all()
+# 4. KUNLIK MASHQLAR (EXERCISES)
+@app.get("/api/mashqlar")
+async def get_daily_exercises(db: AsyncSession = Depends(get_db)):
+    stmt = select(MashqDay)
+    result = await db.execute(stmt)
+    days = result.scalars().all()
     return [
-        MashqDayOut(id=d.id, day_number=d.day_number, title=d.title, is_locked=False)
+        {
+            "id": d.id,
+            "title": d.title,
+            "day_number": getattr(d, "day_number", 1),
+        }
         for d in days
     ]
 
-
 @app.get("/api/mashqlar/{day_id}/questions")
-def get_mashq_questions(day_id: int, db: Session = Depends(get_db)):
-    questions = db.query(MashqQuestion).filter(MashqQuestion.day_id == day_id).all()
+async def get_mashq_questions(
+    day_id: int, db: AsyncSession = Depends(get_db)
+):
+    stmt = select(MashqQuestion).where(MashqQuestion.day_id == day_id)
+    result = await db.execute(stmt)
+    questions = result.scalars().all()
     return [
-        {"id": q.id, "question": q.question, "options": json.loads(q.options)}
+        {
+            "id": q.id,
+            "question": q.question,
+            "options": getattr(q, "options", []),
+        }
         for q in questions
     ]
 
-
-# ---------------------------------------------------------------------------
-# API — Lug'atlar (A1-B1 ochiq, B2-C2 qulflangan)
-# ---------------------------------------------------------------------------
-
-@app.get("/api/lugat", response_model=list[DictionaryWordOut])
-def list_dictionary(level: str, db: Session = Depends(get_db)):
-    is_locked = level in LOCKED_LUGAT_LEVELS
-    if is_locked:
-        # Qulflangan darajada so'zlar sonini ko'rsatamiz, lekin mazmunini bermaymiz
-        count = db.query(DictionaryWord).filter(DictionaryWord.level == level).count()
-        return [
-            DictionaryWordOut(id=0, level=level, arabic="🔒", uzbek=f"{count} ta so'z — Premium", example=None, is_locked=True)
-        ] if count else []
-    words = db.query(DictionaryWord).filter(DictionaryWord.level == level).all()
+# 5. LUG'AT (DICTIONARY)
+@app.get("/api/lugat")
+async def get_dictionary(db: AsyncSession = Depends(get_db)):
+    stmt = select(DictionaryWord)
+    result = await db.execute(stmt)
+    words = result.scalars().all()
     return [
-        DictionaryWordOut(id=w.id, level=w.level, arabic=w.arabic, uzbek=w.uzbek, example=w.example, is_locked=False)
+        {
+            "id": w.id,
+            "arabic": w.arabic,
+            "uzbek": w.uzbek,
+            "level": getattr(w, "level", "A1"),
+            "is_locked": getattr(w, "is_locked", False),
+        }
         for w in words
     ]
 
-@app.get("/api/partner-channels", response_model=list[PartnerChannelOut])
-def list_partner_channels(db: Session = Depends(get_db)):
-    return db.query(PartnerChannel).order_by(PartnerChannel.order).all()
+# 6. HAMKOR KANALLAR
+@app.get("/api/partner-channels")
+async def get_partner_channels(db: AsyncSession = Depends(get_db)):
+    stmt = select(PartnerChannel)
+    result = await db.execute(stmt)
+    channels = result.scalars().all()
+    return [
+        {
+            "id": c.id,
+            "name": c.name,
+            "link": c.link,
+            "channel_id": getattr(c, "channel_id", ""),
+        }
+        for c in channels
+    ]
 
-# ---------------------------------------------------------------------------
-# API — Javob yuborish (barcha turdagi mashqlar uchun umumiy)
-# ---------------------------------------------------------------------------
-
+# 7. JAVOB TOPSHIRISH VA XP/LEVEL OSHIRISH
 @app.post("/api/answer")
-def submit_answer(payload: AnswerIn, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-    model_map = {
-        "learn": LearnExercise,
-        "mashq": MashqQuestion,
-        "test": LevelTestQuestion,
-    }
-    model = model_map.get(payload.exercise_type)
-    if not model:
-        raise HTTPException(status_code=400, detail="Noto'g'ri exercise_type")
+async def submit_answer(
+    data: AnswerSubmit,
+    user: User = Depends(get_current_user),
+    db: AsyncSession = Depends(get_db),
+):
+    is_correct = False
+    correct_option = ""
 
-    exercise = db.query(model).filter(model.id == payload.exercise_id).first()
-    if not exercise:
-        raise HTTPException(status_code=404, detail="Mashq topilmadi")
+    if data.question_type == "learn":
+        stmt = select(LearnExercise).where(LearnExercise.id == data.question_id)
+        res = await db.execute(stmt)
+        q = res.scalar_one_or_none()
+        if q:
+            correct_option = getattr(q, "correct_option", "")
+            is_correct = data.selected_option.strip() == correct_option.strip()
+    elif data.question_type == "test":
+        stmt = select(LevelTestQuestion).where(LevelTestQuestion.id == data.question_id)
+        res = await db.execute(stmt)
+        q = res.scalar_one_or_none()
+        if q:
+            correct_option = getattr(q, "correct_option", "")
+            is_correct = data.selected_option.strip() == correct_option.strip()
+    elif data.question_type == "mashq":
+        stmt = select(MashqQuestion).where(MashqQuestion.id == data.question_id)
+        res = await db.execute(stmt)
+        q = res.scalar_one_or_none()
+        if q:
+            correct_option = getattr(q, "correct_option", "")
+            is_correct = data.selected_option.strip() == correct_option.strip()
 
-    is_correct = payload.answer.strip() == exercise.correct_answer.strip()
     if is_correct:
         user.xp += 10
-        db.commit()
+        new_level = (user.xp // 100) + 1
+        if new_level > user.level:
+            user.level = new_level
+        await db.commit()
 
     return {
-        "correct": is_correct,
-        "correct_answer": exercise.correct_answer,
-        "explanation": getattr(exercise, "explanation", None),
-        "xp": user.xp,
+        "is_correct": is_correct,
+        "correct_option": correct_option,
+        "current_xp": user.xp,
+        "current_level": user.level,
     }
 
+# ------------------- SQLADMIN INTEGRATSIYASI -------------------
 
-@app.get("/")
-def root():
-    return {"status": "Arobiy Education API ishlayapti"}
+admin = Admin(app, engine)
 
+class UserAdmin(ModelView, model=User):
+    column_list = [
+        User.id,
+        User.telegram_id,
+        User.full_name,
+        User.phone_number,
+        User.xp,
+        User.level,
+    ]
+    column_searchable_list = [User.full_name, User.telegram_id, User.phone_number]
 
-# ---------------------------------------------------------------------------
-# Admin panel — http://localhost:8000/admin
-# Bu yerdan brauzer orqali darslar, mashqlar, so'zlar qo'shish/tahrirlash mumkin
-# ---------------------------------------------------------------------------
-
-class AdminAuth(AuthenticationBackend):
-    async def login(self, request: Request) -> bool:
-        form = await request.form()
-        username, password = form.get("username"), form.get("password")
-        if username == ADMIN_USERNAME and password == ADMIN_PASSWORD:
-            request.session.update({"admin_authenticated": "1"})
-            return True
-        return False
-
-    async def logout(self, request: Request) -> bool:
-        request.session.clear()
-        return True
-
-    async def authenticate(self, request: Request) -> bool:
-        return request.session.get("admin_authenticated") == "1"
-
-
-admin = Admin(app, engine, title="Arobiy Education — Admin", authentication_backend=AdminAuth(secret_key=ADMIN_SECRET_KEY))
-
+class LearnCategoryAdmin(ModelView, model=LearnCategory):
+    column_list = [LearnCategory.id, LearnCategory.title]
 
 class LearnLessonAdmin(ModelView, model=LearnLesson):
-    name = "Dars (Alifbo/Nahv/Sarf)"
-    name_plural = "Darslar"
-    column_list = [LearnLesson.id, LearnLesson.section, LearnLesson.order, LearnLesson.title, LearnLesson.video_url]
-    form_columns = [LearnLesson.section, LearnLesson.order, LearnLesson.title, LearnLesson.content, LearnLesson.video_url]
-
+    column_list = [LearnLesson.id, LearnLesson.category_id, LearnLesson.title]
 
 class LearnExerciseAdmin(ModelView, model=LearnExercise):
-    name = "Dars mashqi"
-    name_plural = "Dars mashqlari"
-
-    column_list = [
-        LearnExercise.id,
-        LearnExercise.lesson,
-        LearnExercise.question,
-        LearnExercise.correct_answer,
-    ]
-
-    form_columns = [
-        LearnExercise.lesson,
-        LearnExercise.question,
-        LearnExercise.options,
-        LearnExercise.correct_answer,
-        LearnExercise.explanation,
-    ]
+    column_list = [LearnExercise.id, LearnExercise.lesson_id, LearnExercise.question]
 
 class LevelTestAdmin(ModelView, model=LevelTest):
-    name = "Daraja testi"
-    name_plural = "Daraja testlari"
-    column_list = [LevelTest.id, LevelTest.test_type, LevelTest.title]
-
+    column_list = [LevelTest.id, LevelTest.title]
 
 class LevelTestQuestionAdmin(ModelView, model=LevelTestQuestion):
-    name = "Test savoli"
-    name_plural = "Test savollari"
-    column_list = [LevelTestQuestion.id, LevelTestQuestion.test_id, LevelTestQuestion.question]
-    form_columns = [LevelTestQuestion.test, LevelTestQuestion.question,
-                    LevelTestQuestion.options, LevelTestQuestion.correct_answer]
-
+    column_list = [
+        LevelTestQuestion.id,
+        LevelTestQuestion.test_id,
+        LevelTestQuestion.question,
+    ]
 
 class MashqDayAdmin(ModelView, model=MashqDay):
-    name = "Mashq kuni"
-    name_plural = "Mashq kunlari"
-    column_list = [MashqDay.id, MashqDay.day_number, MashqDay.title]
-    form_columns = [MashqDay.day_number, MashqDay.title]
+    column_list = [MashqDay.id, MashqDay.title]
 
 class MashqQuestionAdmin(ModelView, model=MashqQuestion):
-    name = "Mashq savoli"
-    name_plural = "Mashq savollari"
     column_list = [MashqQuestion.id, MashqQuestion.day_id, MashqQuestion.question]
-    form_columns = [MashqQuestion.day, MashqQuestion.question,
-                    MashqQuestion.options, MashqQuestion.correct_answer]
-
 
 class DictionaryWordAdmin(ModelView, model=DictionaryWord):
-    name = "Lug'at so'zi"
-    name_plural = "Lug'at so'zlari"
-    column_list = [DictionaryWord.id, DictionaryWord.level, DictionaryWord.arabic, DictionaryWord.uzbek]
-    form_columns = [DictionaryWord.level, DictionaryWord.arabic, DictionaryWord.uzbek, DictionaryWord.example]
+    column_list = [DictionaryWord.id, DictionaryWord.arabic, DictionaryWord.uzbek]
+    column_searchable_list = [DictionaryWord.arabic, DictionaryWord.uzbek]
 
 class PartnerChannelAdmin(ModelView, model=PartnerChannel):
-    name = "Hamkor kanal"
-    name_plural = "Hamkor kanallar"
-    column_list = [PartnerChannel.id, PartnerChannel.name, PartnerChannel.subscriber_label, PartnerChannel.order]
-    form_columns = [PartnerChannel.name, PartnerChannel.description, PartnerChannel.avatar_url,
-                    PartnerChannel.telegram_link, PartnerChannel.subscriber_label, PartnerChannel.order]
-    
-class UserAdmin(ModelView, model=User):
-    name = "Foydalanuvchi"
-    name_plural = "Foydalanuvchilar"
-    column_list = [User.id, User.telegram_id, User.first_name, User.last_name, User.phone_number, User.is_premium]
-    can_create = False
-    can_delete = False
+    column_list = [PartnerChannel.id, PartnerChannel.name, PartnerChannel.link]
 
-
-for view in [LearnLessonAdmin, LearnExerciseAdmin, LevelTestAdmin, LevelTestQuestionAdmin,
-             MashqDayAdmin, MashqQuestionAdmin, DictionaryWordAdmin, UserAdmin]:
-    admin.add_view(view) 
-                 
+admin.add_view(UserAdmin)
+admin.add_view(LearnCategoryAdmin)
+admin.add_view(LearnLessonAdmin)
+admin.add_view(LearnExerciseAdmin)
+admin.add_view(LevelTestAdmin)
+admin.add_view(LevelTestQuestionAdmin)
+admin.add_view(MashqDayAdmin)
+admin.add_view(MashqQuestionAdmin)
+admin.add_view(DictionaryWordAdmin)
 admin.add_view(PartnerChannelAdmin)
